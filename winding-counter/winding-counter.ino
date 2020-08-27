@@ -18,6 +18,7 @@ const int start_stop_button = A3;
 
 int moter_sensor_pin = A4;
 int moter_relay_pin = A5;
+int moter_swithing_led_pin = 13;
 
 int decreaseButtonState = 0;
 int lastDecreaseButtonState = 0;
@@ -31,7 +32,7 @@ int lastMoterSensorState = 0;
 int num = 0000;
 int data_address = 0;
 int num_address = 2;
-int a;
+// int dataCount = 0000;
 
 void setup()
 {
@@ -56,15 +57,17 @@ void setup()
   pinMode(start_stop_button, INPUT);
   pinMode(moter_sensor_pin, INPUT);
   pinMode(moter_relay_pin, OUTPUT);
+  pinMode(moter_swithing_led_pin, OUTPUT);
 
   num = readIntFromEEPROM(num_address);
 }
 
 void loop()
 {
-  if (num < 9999)
+  if (num < 9999 && digitalRead(increase_pin))
   {
-    num += digitalRead(increase_pin);
+    num += 1;
+    // dataCount = num;
     writeIntIntoEEPROM(data_address, num);
     writeIntIntoEEPROM(num_address, num);
   }
@@ -78,6 +81,7 @@ void loop()
       if (num > 0)
       {
         num -= 1;
+        // dataCount = num;
         writeIntIntoEEPROM(data_address, num);
         writeIntIntoEEPROM(num_address, num);
       }
@@ -86,7 +90,7 @@ void loop()
   }
   lastDecreaseButtonState = decreaseButtonState;
 
-  if (startButtonState == 0 && digitalRead(start_stop_button) == HIGH)
+  if (startButtonState == 0 && digitalRead(start_stop_button) == HIGH && num > 4)
   {
     startButtonState = 1;
     moterRelaySate = !moterRelaySate;
@@ -96,6 +100,14 @@ void loop()
     startButtonState = 0;
   }
   digitalWrite(moter_relay_pin, moterRelaySate);
+  if (moterRelaySate == 1)
+  {
+    digitalWrite(moter_swithing_led_pin, HIGH);
+  }
+  else if (moterRelaySate == 0)
+  {
+    digitalWrite(moter_swithing_led_pin, LOW);
+  }
 
   moterSensorState = digitalRead(moter_sensor_pin);
 
@@ -105,17 +117,21 @@ void loop()
     {
       if (num > 0)
       {
-        if (num <= 4)
+        if (num <= 5)
         {
-          moterRelaySate = !moterRelaySate;
+          moterRelaySate = 0;
         }
         num--;
+        // dataCount++;
         writeIntIntoEEPROM(num_address, num);
-        if (num == 0)
-        {
-          delay(1000);
-          num = readIntFromEEPROM(data_address);
-        }
+      }
+      if (num == 0)
+      {
+        // writeIntIntoEEPROM(data_address, dataCount);
+        // dataCount = 0000;
+        delay(2000);
+        num = readIntFromEEPROM(data_address);
+        writeIntIntoEEPROM(num_address,readIntFromEEPROM(data_address));
       }
     }
     delay(10);
