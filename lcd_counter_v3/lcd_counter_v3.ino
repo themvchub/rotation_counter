@@ -39,7 +39,6 @@ boolean buttonActive = false;
 boolean longPressActive = false;
 void setup()
 {
-    Serial.begin(9600);
     //lcd setup
     lcd.begin(16, 2);
     lcd.print("SRIMAA");
@@ -68,8 +67,6 @@ void setup()
 void loop()
 
 {
-    Serial.println(setup_data);
-    Serial.println(count_data);
     if (setup_data < 9999 && digitalRead(increase_pin))
     {
         setup_data += 1;
@@ -179,7 +176,6 @@ void loop()
     //end of reset button
     writeToDisplay(0, setup_data);
     writeToDisplay(1, count_data);
-    Serial.println(count_data);
 }
 
 ////////////////////////////////////////////////////////////
