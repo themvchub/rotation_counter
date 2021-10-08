@@ -12,7 +12,16 @@ const int start_stop_button = A3;
 
 int moter_sensor_pin = A4;
 int moter_relay_pin = A5;
+
+int wind_switch_increase = A7;
+int wind_switch_decrease = A6;
 int moter_swithing_led_pin = 13;
+
+int windSwithcIncreaseButtonState = 0;
+int lastWindSwithcIncreaseButtonState = 0;
+
+int windSwithcDecreaseButtonState = 0;
+int lastWindSwithcDecreaseButtonState = 0;
 
 int decreaseButtonState = 0;
 int lastDecreaseButtonState = 0;
@@ -21,7 +30,7 @@ int startButtonState = 0;
 int moterRelaySate = 0;
 
 int moterSensorState = 0;
-int lastMoterSensorState = 0;
+int lastMoterSensorState = 1;
 
 int motor_status_led_pin_start = 6;
 int motor_status_led_pin_stop = 5;
@@ -39,25 +48,28 @@ boolean buttonActive = false;
 boolean longPressActive = false;
 void setup()
 {
+    // Serial.begin(9600);
     //lcd setup
     lcd.begin(16, 2);
     lcd.print("SRIMAA");
     lcd.setCursor(0, 1);
     lcd.print("ELECTRICALS");
     // LED output
-
+    
     pinMode(increase_pin, INPUT);
     pinMode(decrease_pin, INPUT);
     pinMode(reset_pin, INPUT);
     pinMode(start_stop_button, INPUT);
     pinMode(moter_sensor_pin, INPUT);
+    pinMode(wind_switch_increase, INPUT);
+    pinMode(wind_switch_decrease, INPUT);
     pinMode(moter_relay_pin, OUTPUT);
     pinMode(motor_status_led_pin_start, OUTPUT);
     pinMode(motor_status_led_pin_stop, OUTPUT);
 
     setup_data = readIntFromEEPROM(setup_data_address);
     count_data = readIntFromEEPROM(count_data_address);
-    delay(2000);
+    delay(1000);
     lcd.clear();
     lcd.print("Initialized...");
     delay(2000);
@@ -67,6 +79,8 @@ void setup()
 void loop()
 
 {
+    // Serial.println(setup_data);
+    // Serial.println(count_data);
     if (setup_data < 9999 && digitalRead(increase_pin))
     {
         setup_data += 1;
@@ -88,6 +102,43 @@ void loop()
         delay(10);
     }
     lastDecreaseButtonState = decreaseButtonState;
+
+    //crompton code
+
+    windSwithcIncreaseButtonState = digitalRead(wind_switch_increase);
+
+    if (windSwithcIncreaseButtonState != lastWindSwithcIncreaseButtonState)
+    {
+        if (windSwithcIncreaseButtonState == HIGH)
+        {
+            if (setup_data > 0)
+            {
+                setup_data *= 2;
+                writeIntIntoEEPROM(setup_data_address, setup_data);
+            }
+        }
+        delay(10);
+    }
+    lastWindSwithcIncreaseButtonState = windSwithcIncreaseButtonState;
+
+    windSwithcDecreaseButtonState = digitalRead(wind_switch_decrease);
+
+    if (windSwithcDecreaseButtonState != lastWindSwithcDecreaseButtonState)
+    {
+        if (windSwithcDecreaseButtonState == HIGH)
+        {
+            if (setup_data > 0)
+            {
+                setup_data /= 2;
+                writeIntIntoEEPROM(setup_data_address, setup_data);
+            }
+        }
+        delay(10);
+    }
+    lastWindSwithcDecreaseButtonState = windSwithcDecreaseButtonState;
+
+    //crompton code
+
 
     if (startButtonState == 0 && digitalRead(start_stop_button) == HIGH && (setup_data - count_data) > 4)
     {
@@ -111,6 +162,8 @@ void loop()
     }
     //sensing logic
     moterSensorState = digitalRead(moter_sensor_pin);
+    Serial.println("state");
+    Serial.println(moterSensorState);Serial.println("last state");Serial.println(lastMoterSensorState);
 
     if (moterSensorState != lastMoterSensorState)
     {
@@ -176,6 +229,7 @@ void loop()
     //end of reset button
     writeToDisplay(0, setup_data);
     writeToDisplay(1, count_data);
+    // Serial.println(count_data);
 }
 
 ////////////////////////////////////////////////////////////
