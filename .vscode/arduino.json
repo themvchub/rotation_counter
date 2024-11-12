@@ -1,5 +1,0 @@
-{
-    "board": "arduino:avr:uno",
-    "port": "/dev/ttyACM0",
-    "sketch": "winding-counter/winding-counter.ino"
-}
