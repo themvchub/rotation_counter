@@ -1,268 +1,196 @@
-// include the library code:
-#include <LiquidCrystal.h>
-#include <EEPROM.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+#include <Keypad.h>
 
-const int rs = 12, en = 11, d4 = 10, d5 = 9, d6 = 8, d7 = 7;
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-//counter setup
-const int increase_pin = A0;
-const int decrease_pin = A1;
-const int reset_pin = A2;
-const int start_stop_button = A3;
 
-int moter_sensor_pin = A4;
-int moter_relay_pin = A5;
+// OLED Display Settings
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-int wind_switch_increase = A7;
-int wind_switch_decrease = A6;
-int moter_swithing_led_pin = 13;
+// Keypad Settings
+const byte ROWS = 4;
+const byte COLS = 3;
+char keys[ROWS][COLS] = {
+  { '1', '2', '3' },
+  { '4', '5', '6' },
+  { '7', '8', '9' },
+  { '*', '0', '#' }
+};
+byte rowPins[ROWS] = { 32, 33, 25, 26 };  // ESP32 GPIOs for rows
+byte colPins[COLS] = { 27, 14, 12 };      // ESP32 GPIOs for columns
 
-int windSwithcIncreaseButtonState = 0;
-int lastWindSwithcIncreaseButtonState = 0;
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
-int windSwithcDecreaseButtonState = 0;
-int lastWindSwithcDecreaseButtonState = 0;
+// Motor and Sensor Pins
+#define MOTOR_PIN 5
+#define SENSOR_PIN 34
+#define S_S_BTN_PIN 35
 
-int decreaseButtonState = 0;
-int lastDecreaseButtonState = 0;
-
-int startButtonState = 0;
-int moterRelaySate = 0;
-
+// Variables
+int targetCount = 0;    // User-specified target count
+int rotationCount = 0;  // Current rotation count
+bool motorRunning = false;
+bool startButtonState = false;
 int moterSensorState = 0;
 int lastMoterSensorState = 1;
 
-int motor_status_led_pin_start = 6;
-int motor_status_led_pin_stop = 5;
+// Button State Tracking
+bool lastButtonState = LOW;  // Previous state of the button
+bool buttonPressed = false;  // Tracks if the button was pressed
 
-int setup_data = 0;
-int count_data = 0;
-int setup_data_address = 0;
-int count_data_address = 2;
-// int dataCount = 0000;
+// Function to Update OLED Display
+void updateDisplay(int address = 0, String message = "") {
+  display.clearDisplay();
 
-long buttonTimer = 0;
-long longPressTime = 1000;
+  // Line 1: Set Value
+  display.setCursor(0, 0);
+  display.setTextSize(2);
+  display.print("SETUP:");
+  display.println(targetCount);
 
-boolean buttonActive = false;
-boolean longPressActive = false;
-void setup()
-{
-    // Serial.begin(9600);
-    //lcd setup
-    lcd.begin(16, 2);
-    lcd.print("SRIMAA");
-    lcd.setCursor(0, 1);
-    lcd.print("ELECTRICALS");
-    // LED output
-    
-    pinMode(increase_pin, INPUT);
-    pinMode(decrease_pin, INPUT);
-    pinMode(reset_pin, INPUT);
-    pinMode(start_stop_button, INPUT);
-    pinMode(moter_sensor_pin, INPUT);
-    pinMode(wind_switch_increase, INPUT);
-    pinMode(wind_switch_decrease, INPUT);
-    pinMode(moter_relay_pin, OUTPUT);
-    pinMode(motor_status_led_pin_start, OUTPUT);
-    pinMode(motor_status_led_pin_stop, OUTPUT);
+  // Line 2: Current Count
+  display.setCursor(0, 16);
+  display.print("COUNT:");
+  display.println(rotationCount);
 
-    setup_data = readIntFromEEPROM(setup_data_address);
-    count_data = readIntFromEEPROM(count_data_address);
-    delay(1000);
-    lcd.clear();
-    lcd.print("Initialized...");
-    delay(2000);
-    lcd.clear();
+  // Line 3: Motor Status
+  display.setCursor(0, 32);
+  display.print("MOTOR:");
+  display.println(motorRunning ? "Run" : "Stop");
+
+  // Line 4: Additional Message (Optional)
+  if (message != "") {
+    display.setCursor(address, 53);
+    display.setTextSize(1);
+    display.println(message);
+  }
+
+  display.display();
 }
 
-void loop()
+void setup() {
+  // Initialize serial monitor
+  Serial.begin(115200);
 
-{
-    // Serial.println(setup_data);
-    // Serial.println(count_data);
-    if (setup_data < 9999 && digitalRead(increase_pin))
-    {
-        setup_data += 1;
-        writeIntIntoEEPROM(setup_data_address, setup_data);
+  // Initialize OLED display
+  if (!display.begin(0x3C)) {  // Default I2C address for SH1106
+    Serial.println(F("OLED initialization failed"));
+    for (;;)
+      ;  // Halt execution if OLED fails
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(50, 16);  // Row 3
+  display.println(F("SRIMAA"));
+  display.setCursor(35, 32);
+  display.println(F("ELECTRICALS"));
+  display.display();
+  delay(5000);
+  display.clearDisplay();
+  updateDisplay();
+
+  // Initialize motor and sensor
+  pinMode(MOTOR_PIN, OUTPUT);
+  pinMode(SENSOR_PIN, INPUT_PULLUP);
+  pinMode(S_S_BTN_PIN, INPUT_PULLUP);
+  digitalWrite(MOTOR_PIN, LOW);
+}
+
+void loop() {
+  static String inputNumber = "";  // For capturing user input from the keypad
+  char key = keypad.getKey();
+
+  // Handle Keypad Input
+  if (key && !motorRunning) {
+    if (key >= '0' && key <= '9') {    // Numeric keys
+      if (inputNumber.length() < 4) {  // Max 4 digits
+        inputNumber += key;
+        targetCount = inputNumber.toInt();
+      }
+
+    } else if (key == '#') {  // Confirm target value
+      rotationCount = 0;
+
+    } else if (key == '*') {
+      inputNumber = "";
+      targetCount = 0;
     }
+    updateDisplay();
+  }
 
-    decreaseButtonState = digitalRead(decrease_pin);
+  // Handle Start/Stop Button (State Change Detection)
+  bool currentButtonState = digitalRead(S_S_BTN_PIN);
+  if (currentButtonState == HIGH && lastButtonState == LOW) {
+    buttonPressed = true;  // Button was pressed
+  }
 
-    if (decreaseButtonState != lastDecreaseButtonState)
-    {
-        if (decreaseButtonState == HIGH)
-        {
-            if (setup_data > 0)
-            {
-                setup_data -= 1;
-                writeIntIntoEEPROM(setup_data_address, setup_data);
-            }
+  if (currentButtonState == LOW && lastButtonState == HIGH && buttonPressed) {
+    buttonPressed = false;                 // Button released
+    startButtonState = !startButtonState;  // Toggle start button state
+
+    if (startButtonState && (targetCount - rotationCount) > 4) {
+      startMotor();
+    } else {
+      stopMotor();
+    }
+  }
+  lastButtonState = currentButtonState;
+
+  // Handle Sensor Input
+  moterSensorState = digitalRead(SENSOR_PIN);
+
+  if (moterSensorState != lastMoterSensorState) {
+    if (moterSensorState == LOW) {
+      if (rotationCount < targetCount) {
+        if ((targetCount - rotationCount) < 4) {
+          stopMotor();
         }
-        delay(10);
-    }
-    lastDecreaseButtonState = decreaseButtonState;
-
-    //crompton code
-
-    windSwithcIncreaseButtonState = digitalRead(wind_switch_increase);
-
-    if (windSwithcIncreaseButtonState != lastWindSwithcIncreaseButtonState)
-    {
-        if (windSwithcIncreaseButtonState == HIGH)
-        {
-            if (setup_data > 0)
-            {
-                setup_data *= 2;
-                writeIntIntoEEPROM(setup_data_address, setup_data);
-            }
+        rotationCount++;
+        updateDisplay();
+        // Add debounce
+        if (rotationCount == targetCount) {
+          rotationCount = 0;
+          cleanupDisplay();
         }
-        delay(10);
-    }
-    lastWindSwithcIncreaseButtonState = windSwithcIncreaseButtonState;
-
-    windSwithcDecreaseButtonState = digitalRead(wind_switch_decrease);
-
-    if (windSwithcDecreaseButtonState != lastWindSwithcDecreaseButtonState)
-    {
-        if (windSwithcDecreaseButtonState == HIGH)
-        {
-            if (setup_data > 0)
-            {
-                setup_data /= 2;
-                writeIntIntoEEPROM(setup_data_address, setup_data);
-            }
-        }
-        delay(10);
-    }
-    lastWindSwithcDecreaseButtonState = windSwithcDecreaseButtonState;
-
-    //crompton code
-
-
-    if (startButtonState == 0 && digitalRead(start_stop_button) == HIGH && (setup_data - count_data) > 4)
-    {
-        startButtonState = 1;
-        moterRelaySate = !moterRelaySate;
-    }
-    if (startButtonState == 1 && digitalRead(start_stop_button) == LOW)
-    {
-        startButtonState = 0;
-    }
-    digitalWrite(moter_relay_pin, moterRelaySate);
-    if (moterRelaySate == 1)
-    {
-        digitalWrite(motor_status_led_pin_start, HIGH);
-        digitalWrite(motor_status_led_pin_stop, LOW);
-    }
-    else if (moterRelaySate == 0)
-    {
-        digitalWrite(motor_status_led_pin_stop, HIGH);
-        digitalWrite(motor_status_led_pin_start, LOW);
-    }
-    //sensing logic
-    moterSensorState = digitalRead(moter_sensor_pin);
-    Serial.println("state");
-    Serial.println(moterSensorState);Serial.println("last state");Serial.println(lastMoterSensorState);
-
-    if (moterSensorState != lastMoterSensorState)
-    {
-        if (moterSensorState == HIGH)
-        {
-            if (count_data < setup_data)
-            {
-                if ((setup_data - count_data) < 4)
-                {
-                    moterRelaySate = 0;
-                }
-                count_data++;
-                writeIntIntoEEPROM(count_data_address, count_data);
-            }
-            if (count_data == setup_data)
-            {
-                lcd.setCursor(0, 1);
-                lcd.print("1 SET COMPLETED");
-
-                delay(5000);
-                lcd.clear();
-                count_data = 0;
-                writeIntIntoEEPROM(count_data_address, count_data);
-            }
-        }
-        delay(10);
+      }
     }
     lastMoterSensorState = moterSensorState;
-    //reset code
-    if (digitalRead(reset_pin) == HIGH)
-    {
-        if (buttonActive == false)
-        {
-            buttonActive = true;
-            buttonTimer = millis();
-        }
-
-        if ((millis() - buttonTimer > longPressTime) && (longPressActive == false))
-        {
-            longPressActive = true;
-            setup_data = 0;
-            count_data = 0;
-            writeIntIntoEEPROM(setup_data_address, setup_data);
-            writeIntIntoEEPROM(count_data_address, count_data);
-        }
-    }
-    else
-    {
-        if (buttonActive == true)
-        {
-            if (longPressActive == true)
-            {
-                longPressActive = false;
-            }
-            else
-            {
-                count_data = 0;
-                writeIntIntoEEPROM(count_data_address, count_data);
-            }
-            buttonActive = false;
-        }
-    }
-    //end of reset button
-    writeToDisplay(0, setup_data);
-    writeToDisplay(1, count_data);
-    // Serial.println(count_data);
+  }
 }
 
-////////////////////////////////////////////////////////////
-
-void writeIntIntoEEPROM(int address, int number)
-{
-    EEPROM.write(address, number >> 8);
-    EEPROM.write(address + 1, number & 0xFF);
+// Function to Start the Motor
+void startMotor() {
+  updateDisplay(25, "Lunch Control");
+  delay(1000);
+  for (int i = 3; i > 0; i--) {
+    updateDisplay(62, String(i));
+    delay(1000);
+  }
+  updateDisplay(48, "READY");
+  delay(1000);
+  motorRunning = true;
+  digitalWrite(MOTOR_PIN, HIGH);
+  updateDisplay();
 }
 
-int readIntFromEEPROM(int address)
-{
-    return (EEPROM.read(address) << 8) + EEPROM.read(address + 1);
+// Function to Stop the Motor
+void stopMotor() {
+  motorRunning = false;
+  digitalWrite(MOTOR_PIN, LOW);
+  updateDisplay();
 }
-void writeToDisplay(int row_no, int num)
-{
-    if (row_no == 0)
-    {
-        lcd.setCursor(0, row_no);
-        lcd.print("Setup :");
-    }
-    else
-    {
-        lcd.setCursor(0, row_no);
-        lcd.print("Count :");
-    }
 
-    lcd.setCursor(8, row_no);
-    lcd.print(num / 1000);
-    lcd.setCursor(9, row_no);
-    lcd.print(num / 100 % 10);
-    lcd.setCursor(10, row_no);
-    lcd.print(num / 10 % 10);
-    lcd.setCursor(11, row_no);
-    lcd.print(num % 10);
+void cleanupDisplay() {
+  display.clearDisplay();
+  display.setCursor(35, 16);  // Row 2
+  display.println(F("1 Set"));
+  display.setCursor(10, 48);  // Row 4
+  display.println(F("COMPLETED"));
+  display.display();
+  delay(5000);
+  updateDisplay();
 }
